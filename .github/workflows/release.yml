@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build AAR and publish release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -78,8 +80,7 @@ jobs:
 
       - name: Install NDK and CMake
         run: |
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          sdkmanager --install \
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install \
             "ndk;${{ steps.version.outputs.ndk_version }}" \
             "cmake;${{ steps.version.outputs.cmake_version }}"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ steps.version.outputs.ndk_version }}" \
