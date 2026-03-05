@@ -1,0 +1,17 @@
+[versions]
+# curl 8.18.0 — released 2026-01-07
+# Tarball: https://curl.se/download/curl-8.18.0.tar.xz
+# SHA-256 fetched at build time from the accompanying .tar.xz.sha256 file on curl.se
+curl           = "8.18.0"
+minSdk         = "21"
+ndkVersion     = "29.0.13113456"
+sdkToolsVersion = "11076708"
+# CMake version bundled with the NDK / available via sdkmanager
+cmakeVersion   = "3.31.0"
+
+# OpenSSL Ivy repository — base URL for the flat Ivy repository produced by
+# openssl-android-aar. The build downloads the static AAR from here and unpacks
+# headers + .a files for each ABI.
+# Override at build time with -PopensslRepoUrl=<url>
+opensslVersion = "3.5.5"
+opensslRepoUrl = "https://github.com/wellenvogel/openssl-android-aar/releases/download/3.5.5"

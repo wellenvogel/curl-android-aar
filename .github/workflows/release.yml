@@ -1,0 +1,109 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - release
+
+jobs:
+  build:
+    name: Build AAR and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Read versions from TOML
+        id: version
+        run: |
+          python3 - << 'EOF'
+          import tomllib, os
+
+          with open("gradle/libs.versions.toml", "rb") as f:
+              toml = tomllib.load(f)
+
+          versions = toml["versions"]
+          curl_version    = versions["curl"]
+          ndk_version     = versions["ndkVersion"]
+          cmake_version   = versions["cmakeVersion"]
+          openssl_repo    = versions["opensslRepoUrl"]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"curl_version={curl_version}\n")
+              out.write(f"ndk_version={ndk_version}\n")
+              out.write(f"cmake_version={cmake_version}\n")
+              out.write(f"openssl_repo_url={openssl_repo}\n")
+              out.write(f"tag_name={curl_version}\n")
+          EOF
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: |
+          echo "y" | sdkmanager \
+            "ndk;${{ steps.version.outputs.ndk_version }}" \
+            "cmake;${{ steps.version.outputs.cmake_version }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ steps.version.outputs.ndk_version }}" \
+            >> "$GITHUB_ENV"
+
+      - name: Build static AAR
+        run: |
+          ./gradlew publishReleasePublicationToLocalRepository \
+            -PopensslRepoUrl="${{ steps.version.outputs.openssl_repo_url }}"
+
+      - name: Build shared AAR
+        run: |
+          ./gradlew publishReleasePublicationToLocalRepository \
+            -PbuildShared=true \
+            -PopensslRepoUrl="${{ steps.version.outputs.openssl_repo_url }}"
+
+      - name: List repository artifacts
+        run: ls -lh build/repository/
+
+      - name: Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag_name }}"
+          VERSION="${{ steps.version.outputs.curl_version }}"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --target release \
+            --notes "Prefab AAR for curl ${VERSION} targeting Android.
+
+          Linked against OpenSSL (TLS backend).
+
+          **Artifacts**
+          - \`*-curl-*.aar\` — static library build (link into your binary)
+          - \`*-curl-shared-*.aar\` — shared library build (bundled as \`.so\` at runtime)
+          - \`*.ivy\` — Ivy descriptor files for dependency resolution
+
+          **Consuming via Gradle (Ivy repository)**
+          \`\`\`kotlin
+          repositories {
+              ivy {
+                  url = uri(\"https://github.com/${{ github.repository }}/releases/download/${TAG}\")
+                  patternLayout {
+                      artifact(\"[organisation]-[module]-[revision].[ext]\")
+                      ivy(\"[organisation]-[module]-[revision].ivy\")
+                  }
+                  metadataSources { ivyDescriptor() }
+              }
+          }
+          dependencies {
+              // Static (also add the openssl-android-aar repository):
+              implementation(\"de.wellenvogel.android.ndk.thirdparty:curl:${VERSION}@aar\")
+              // Shared:
+              // implementation(\"de.wellenvogel.android.ndk.thirdparty:curl-shared:${VERSION}@aar\")
+          }
+          \`\`\`" \
+            build/repository/*

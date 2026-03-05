@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Minimal manifest for a native-only Prefab AAR.
+    There are no Java/Kotlin classes, activities, or permissions.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="de.wellenvogel.android.ndk.thirdparty.curl" />
