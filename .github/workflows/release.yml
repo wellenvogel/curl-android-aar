@@ -34,7 +34,6 @@ jobs:
           ndk_version   = versions["ndkVersion"]
           cmake_version = versions["cmakeVersion"]
           openssl_repo  = versions["opensslRepoUrl"]
-          # Derive the GitHub tag (dots → underscores)
           curl_tag = "curl-" + curl_version.replace(".", "_")
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
@@ -47,10 +46,9 @@ jobs:
           EOF
 
       - name: Compute curl tarball SHA-256 and patch TOML
-        id: tarball
         run: |
           python3 - << 'EOF'
-          import hashlib, os, urllib.request, tomllib
+          import hashlib, os, urllib.request, tomllib, re
 
           with open("gradle/libs.versions.toml", "rb") as f:
               toml = tomllib.load(f)
@@ -68,27 +66,20 @@ jobs:
           sha256 = digest.hexdigest()
           print(f"SHA-256: {sha256}")
 
-          # Patch the TOML in-place so Gradle picks it up
           toml_path = "gradle/libs.versions.toml"
           text = open(toml_path).read()
-          import re
           text = re.sub(r'curlSha256\s*=\s*"[^"]*"', f'curlSha256     = "{sha256}"', text)
           open(toml_path, "w").write(text)
           print("TOML patched.")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"curl_sha256={sha256}\n")
           EOF
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
 
       - name: Install Ninja
         run: sudo apt-get install -y ninja-build
 
       - name: Install NDK and CMake
         run: |
-          echo "y" | sdkmanager \
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          sdkmanager --install \
             "ndk;${{ steps.version.outputs.ndk_version }}" \
             "cmake;${{ steps.version.outputs.cmake_version }}"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ steps.version.outputs.ndk_version }}" \
