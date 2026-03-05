@@ -1,8 +1,12 @@
 [versions]
 # curl 8.18.0 — released 2026-01-07
-# Tarball: https://curl.se/download/curl-8.18.0.tar.xz
-# SHA-256 fetched at build time from the accompanying .tar.xz.sha256 file on curl.se
+# Tarball: https://github.com/curl/curl/releases/download/curl-8_18_0/curl-8.18.0.tar.xz
+# curl does not publish .sha256 companion files. Pin the SHA-256 here and update it
+# whenever curlVersion changes. Obtain it by running:
+#   curl -fsSL https://github.com/curl/curl/releases/download/curl-8_18_0/curl-8.18.0.tar.xz | sha256sum
+# Pass -PskipHashCheck=true to bypass verification during local development.
 curl           = "8.18.0"
+curlSha256     = "PLACEHOLDER_UPDATE_ME"
 minSdk         = "21"
 ndkVersion     = "29.0.13113456"
 sdkToolsVersion = "11076708"
