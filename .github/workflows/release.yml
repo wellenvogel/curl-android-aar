@@ -83,6 +83,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
       - name: Install NDK and CMake
         run: |
           echo "y" | sdkmanager \
