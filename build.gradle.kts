@@ -41,23 +41,29 @@ val libType    = if (buildShared) "shared" else "static"
 val artifactId = if (buildShared) "curl-shared" else "curl"
 
 // Base URL of the flat Ivy repository that holds the OpenSSL AAR.
-// Artifact filename follows the pattern:
-//   <organisation>-<module>-<revision>.<ext>
-// e.g. de.wellenvogel.android.ndk.thirdparty-openssl[-shared]-3.5.5.aar
+// Gradle resolves the dependency via a normal ivy { } repository block; no manual
+// HTTP download is needed. Override at build time with -PopensslRepoUrl=<url>.
 val opensslRepoUrl: String = (findProperty("opensslRepoUrl") as String?)
     ?.trimEnd('/')
     ?: libs.versions.opensslRepoUrl.get().trimEnd('/')
 
-val opensslOrg      = "de.wellenvogel.android.ndk.thirdparty"
+val opensslGroup  = "de.wellenvogel.android.ndk.thirdparty"
 // For a shared curl build we need the OpenSSL shared AAR (contains .so files);
 // for a static curl build we need the static AAR (contains .a files).
-val opensslModule   = if (buildShared) "openssl-shared" else "openssl"
-val opensslRevision = opensslVersion
-val opensslAarName  = "${opensslOrg}-${opensslModule}-${opensslRevision}.aar"
-val opensslAarUrl   = "$opensslRepoUrl/$opensslAarName"
+val opensslModule = if (buildShared) "openssl-shared" else "openssl"
 
-// Where the unpacked OpenSSL headers and .a files land (inside our build dir)
-val opensslDir: File = layout.buildDirectory.dir("openssl-prefab").get().asFile
+// opensslAar configuration declared here, after opensslModule is known, so the
+// dependency string resolves to the correct module (openssl vs openssl-shared).
+// The dir is build-type-specific so static and shared extractions don't collide.
+val opensslAar: Configuration by configurations.creating {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+    isTransitive    = false
+}
+
+// Where the unpacked OpenSSL headers and libs land (inside our build dir).
+// Use a type-specific subdirectory so static and shared builds don't collide.
+val opensslDir: File = layout.buildDirectory.dir("openssl-prefab-$libType").get().asFile
 
 // curl releases tarballs from GitHub; the tag uses underscores (curl-8_18_0).
 // curl.se does not publish .sha256 companion files for .tar.xz archives.
@@ -66,8 +72,33 @@ val curlGithubTag  = "curl-" + curlVersion.replace(".", "_")
 val tarballBaseUrl = "https://github.com/curl/curl/releases/download/$curlGithubTag"
 val moduleDir      = projectDir
 val curlOut        = moduleDir.resolve("src/main/cpp/curl")
-val scratchDir     = layout.buildDirectory.dir("curl-build").get().asFile
-val opensslScratch = layout.buildDirectory.dir("openssl-download").get().asFile
+val scratchDir = layout.buildDirectory.dir("curl-build").get().asFile
+
+// Declare the OpenSSL Ivy repository and wire the dependency into opensslAar.
+// These blocks must come after the val declarations (opensslRepoUrl / opensslModule
+// / opensslVersion) but before any task references the configuration.
+repositories {
+    ivy {
+        name = "openssl-ivy"
+        url  = uri(opensslRepoUrl)
+        patternLayout {
+            artifact("[organisation]-[module]-[revision].[ext]")
+            ivy("[organisation]-[module]-[revision].ivy")
+        }
+        metadataSources {
+            // The Ivy descriptor is present; fall back to artifact-only if missing
+            ivyDescriptor()
+            artifact()
+        }
+        content {
+            includeGroup(opensslGroup)
+        }
+    }
+}
+
+dependencies {
+    opensslAar("$opensslGroup:$opensslModule:$opensslVersion@aar")
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -87,17 +118,6 @@ fun sha256(file: File): String {
 val httpClient: java.net.http.HttpClient = java.net.http.HttpClient.newBuilder()
     .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
     .build()
-
-fun fetchText(url: String): String {
-    val request = java.net.http.HttpRequest.newBuilder()
-        .uri(URI(url))
-        .header("User-Agent", "Gradle/curl-android-aar")
-        .GET().build()
-    val response = httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-    if (response.statusCode() !in 200..299)
-        throw GradleException("GET $url returned HTTP ${response.statusCode()}")
-    return response.body().trim()
-}
 
 fun download(url: String, dest: File) {
     logger.lifecycle("  Downloading $url")
@@ -208,12 +228,9 @@ fun exec(workDir: File, env: Map<String, String>, vararg cmd: String) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Task: resolveOpenSSL
 //
-// Downloads the OpenSSL AAR from the flat Ivy repository at opensslRepoUrl.
-// Which AAR is fetched depends on buildShared:
-//   static curl  → openssl (static AAR, contains .a files)
-//   shared curl  → openssl-shared (shared AAR, contains .so files in prefab/)
-//
-// Unpacks headers and per-ABI libs into build/openssl-prefab/:
+// Gradle resolves the opensslAar configuration (declared above) from the Ivy
+// repository — no manual HTTP download needed. This task unpacks the AAR into
+// build/openssl-prefab/ so CMake can find headers and libraries:
 //
 //   build/openssl-prefab/
 //     include/openssl/         ← ABI-independent headers (from crypto module)
@@ -226,6 +243,8 @@ fun exec(workDir: File, env: Map<String, String>, vararg cmd: String) {
 // The task is skipped when all expected outputs already exist (incremental).
 // ─────────────────────────────────────────────────────────────────────────────
 val resolveOpenSSL by tasks.registering {
+    // Declare the resolved AAR file as an input so the task re-runs if it changes
+    inputs.files(opensslAar)
     outputs.dir(opensslDir)
     outputs.upToDateWhen {
         val libExt = if (buildShared) "so" else "a"
@@ -236,21 +255,12 @@ val resolveOpenSSL by tasks.registering {
     }
 
     doLast {
-        opensslScratch.mkdirs()
+        // Gradle has already downloaded the AAR into its cache; get the local path
+        val aarFile = opensslAar.singleFile
+        logger.lifecycle("Unpacking OpenSSL AAR: ${aarFile.name}")
+
         opensslDir.mkdirs()
-
-        val aarFile = opensslScratch.resolve(opensslAarName)
-
-        if (!aarFile.exists()) {
-            logger.lifecycle("Downloading OpenSSL AAR from $opensslAarUrl ...")
-            download(opensslAarUrl, aarFile)
-            logger.lifecycle("Downloaded $opensslAarName")
-        } else {
-            logger.lifecycle("Using cached $opensslAarName")
-        }
-
-        // Unzip into a staging area, then copy into the expected layout
-        val extractDir = opensslScratch.resolve("extract")
+        val extractDir = opensslDir.resolve(".extract")
         extractDir.deleteRecursively()
         extractDir.mkdirs()
 
@@ -274,9 +284,9 @@ val resolveOpenSSL by tasks.registering {
         }
 
         // Headers: prefab/modules/crypto/include/ → build/openssl-prefab/include/
-        val srcInclude = extractDir.resolve("prefab/modules/crypto/include")
         if (!opensslDir.resolve("include/openssl/ssl.h").exists()) {
-            srcInclude.copyRecursively(opensslDir.resolve("include"), overwrite = true)
+            extractDir.resolve("prefab/modules/crypto/include")
+                .copyRecursively(opensslDir.resolve("include"), overwrite = true)
             logger.lifecycle("OpenSSL headers → ${opensslDir.resolve("include")}")
         }
 
@@ -287,7 +297,6 @@ val resolveOpenSSL by tasks.registering {
         abis.forEach { abi ->
             val libDst = opensslDir.resolve("libs/$abi")
             libDst.mkdirs()
-
             for (pair in listOf(
                 "prefab/modules/crypto/libs/android.$abi/libcrypto.$libExt" to "libcrypto.$libExt",
                 "prefab/modules/ssl/libs/android.$abi/libssl.$libExt"       to "libssl.$libExt"
@@ -296,11 +305,11 @@ val resolveOpenSSL by tasks.registering {
                 extractDir.resolve(srcPath)
                     .copyTo(libDst.resolve(dstName), overwrite = true)
             }
-
             logger.lifecycle("[$abi] OpenSSL libs ($libExt) → $libDst")
         }
 
-        logger.lifecycle("OpenSSL $opensslVersion resolved into $opensslDir")
+        extractDir.deleteRecursively()
+        logger.lifecycle("OpenSSL $opensslVersion unpacked into $opensslDir")
     }
 }
 
