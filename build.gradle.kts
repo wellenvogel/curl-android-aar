@@ -71,7 +71,7 @@ val opensslDir: File = layout.buildDirectory.dir("openssl-prefab-$libType").get(
 val curlGithubTag  = "curl-" + curlVersion.replace(".", "_")
 val tarballBaseUrl = "https://github.com/curl/curl/releases/download/$curlGithubTag"
 val moduleDir      = projectDir
-val curlOut        = moduleDir.resolve("src/main/cpp/curl")
+val curlOut        = layout.buildDirectory.dir("curl-out-$libType").get().asFile
 val scratchDir = layout.buildDirectory.dir("curl-build").get().asFile
 
 // Declare the OpenSSL Ivy repository and wire the dependency into opensslAar.
@@ -555,10 +555,10 @@ val buildCurl by tasks.registering {
 // ─────────────────────────────────────────────────────────────────────────────
 val assemblePrefab by tasks.registering {
     dependsOn(buildCurl)
-    outputs.dir(layout.buildDirectory.dir("prefab"))
+    outputs.dir(layout.buildDirectory.dir("prefab-$libType"))
 
     doLast {
-        val prefabRoot = layout.buildDirectory.dir("prefab").get().asFile
+        val prefabRoot = layout.buildDirectory.dir("prefab-$libType").get().asFile
         prefabRoot.deleteRecursively()
         prefabRoot.mkdirs()
 
@@ -621,7 +621,7 @@ val packageAar by tasks.registering(Zip::class) {
 
     from(moduleDir.resolve("src/main/AndroidManifest.xml"))
     from(emptyJar.get().archiveFile)
-    from(layout.buildDirectory.dir("prefab")) { into("prefab") }
+    from(layout.buildDirectory.dir("prefab-$libType")) { into("prefab") }
 
     if (buildShared) {
         abis.forEach { abi ->
@@ -635,6 +635,34 @@ val packageAar by tasks.registering(Zip::class) {
 
 tasks.register("assembleRelease") { dependsOn(packageAar) }
 tasks.register("assemble")        { dependsOn(packageAar) }
+tasks.register("clean") {
+    group       = "build"
+    description = "Deletes all build outputs for the current build type ($libType). " +
+                  "Use 'cleanAll' to remove outputs for both types."
+    doLast {
+        listOf(
+            layout.buildDirectory.dir("curl-out-$libType").get().asFile,
+            layout.buildDirectory.dir("openssl-prefab-$libType").get().asFile,
+            layout.buildDirectory.dir("prefab-$libType").get().asFile,
+            layout.buildDirectory.dir("outputs/aar").get().asFile,
+            layout.buildDirectory.dir("repository").get().asFile,
+            layout.buildDirectory.dir("intermediates").get().asFile,
+        ).forEach {
+            if (it.deleteRecursively()) logger.lifecycle("Deleted $it")
+        }
+    }
+}
+
+tasks.register("cleanAll") {
+    group       = "build"
+    description = "Deletes all build outputs for both static and shared build types, " +
+                  "including downloaded curl source and resolved OpenSSL artifacts."
+    doLast {
+        val buildDir = layout.buildDirectory.get().asFile
+        if (buildDir.deleteRecursively()) logger.lifecycle("Deleted $buildDir")
+    }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ivy publishing — flat local Ivy repository.
