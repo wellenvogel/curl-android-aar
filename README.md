@@ -2,6 +2,8 @@
 
 Builds **curl 8.18.0** (libcurl) as an Android **Prefab AAR** using NDK 29.
 
+Intended to be used as replacement for the outdated [google android ndk thirdparty libs](https://android.googlesource.com/platform/tools/ndkports).
+
 The entire build — downloading the curl source from GitHub, verifying its
 SHA-256, resolving the OpenSSL dependency via a Gradle Ivy repository,
 locating or auto-installing the NDK and CMake, cross-compiling for all ABIs,
@@ -73,14 +75,8 @@ During local development you can bypass the check:
 
 ## Build
 
-### Step 1 — Install the Gradle wrapper jar (one-time)
 
-```bash
-curl -fSL https://services.gradle.org/distributions/gradle-8.9-wrapper.jar \
-  -o gradle/wrapper/gradle-wrapper.jar
-```
-
-### Step 2 — Build
+### Compile
 
 ```bash
 # Static libraries (default) — produces curl-release.aar
@@ -219,3 +215,5 @@ Force a full rebuild:
 ```bash
 ./gradlew clean assembleRelease
 ```
+
+_Info_: The repository was created using [Claude AI](https://claude.ai/). It was built for and tested with [AvOcharts](https://github.com/wellenvogel/ochartsng).
